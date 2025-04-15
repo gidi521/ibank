@@ -38,6 +38,7 @@ def upload_file():
     
     files = request.files.getlist('files')
     saved_files = []
+    not_saved_files = []
     
     # 获取header中的X-Session-Id
     session_id = request.headers.get('X-Session-Id')
@@ -50,24 +51,33 @@ def upload_file():
     session_csv_folder = os.path.join(UPLOAD_BASE_FOLDER, session_id, 'csv')
     os.makedirs(session_csv_folder, exist_ok=True)
 
-    
-    results = []
-
     for file in files:
         # 检查文件是否为空
         if file.filename == '':
+            not_saved_files.append({
+                'file_name': file.filename,
+                'error': 'filename is empty'
+            })
             continue
         else:
             print(f"Received file: {file.filename}")
             
         # 检查文件类型
         if not allowed_file(file.filename):
+            not_saved_files.append({
+                'file_name': file.filename,
+                'error': 'file type not allowed'
+            })
             continue
             
         # 检查文件大小
         file.seek(0, os.SEEK_END)
         file_length = file.tell()
         if file_length > MAX_FILE_SIZE:
+            not_saved_files.append({
+                'file_name': file.filename,
+                'error': 'file size exceeds limit'
+            })
             continue
         file.seek(0)
         
@@ -77,39 +87,26 @@ def upload_file():
         print(f"Processing file: {filename}")
         save_path = os.path.join(session_pdf_folder, filename)
         file.save(save_path)
-        
-        # 将parsed_basic_doc.nodes的数量和总长度保存下来，将所有文件的结果返回给前端
-        try:
-            parsed_basic_doc = parser.parse(save_path)
-            node_count = len(parsed_basic_doc.nodes)
-            total_length = sum(len(str(node)) for node in parsed_basic_doc.nodes)
-            
-            # 记录文件处理信息
-            print(f"Processed file: {filename}")
-            print(f"Node count: {node_count}, Total length: {total_length}")
-            
-            results.append({
-                'file_name': filename,
-                'node_count': node_count,
-                'total_length': total_length
-            })
 
-            # 将saved_path和对应的parsed_basic_doc.nodes，添加到saved_files中，用于moc_process_files的后续处理
-            saved_files.append({
-                'path': save_path,
-                'nodes': parsed_basic_doc.nodes
-            })
-            
-        except Exception as e:
-            print(f"Error processing file {filename}: {str(e)}")
-            continue
+        # 将成功保存的文件信息记录下来，并将结果返回给前端用于快速响应。
+        # saved_files用于openparse处理
+        saved_files.append({
+            'path': save_path,
+        })
 
-    if not saved_files:
-        return jsonify({'error': 'No valid files uploaded'}), 400
+        if not saved_files:
+            return jsonify({'error': 'No valid files uploaded'}), 400
 
     # 立即返回响应，后台处理
     try:
-        executor.submit(moc_process_files, saved_files, session_csv_folder)
+        future = executor.submit(process_files, saved_files, session_csv_folder)
+        # 添加回调函数来捕获异常
+        def callback(f):
+            try:
+                f.result()  # 这会抛出任务中的任何异常
+            except Exception as e:
+                print(f"Background task failed: {str(e)}")
+        future.add_done_callback(callback)
         print("Background processing started successfully")
     except Exception as e:
         print(f"Error starting background processing: {str(e)}")
@@ -117,25 +114,27 @@ def upload_file():
     
     return jsonify({
         'message': '文件已接收，正在处理...',
-        'results': results
+        'saved_files': saved_files,
+        'not_saved_files': not_saved_files
     }), 202
 
-def moc_process_files(files, session_csv_folder):
+
+def process_files(files, session_csv_folder):
+    print("Starting background processing...")
+    error_messages = []
+    
     for file_info in files:
         save_path = file_info['path']
-        nodes = file_info['nodes']
         try:
-            # 处理每个文件
-            # 模拟长时间处理
-            time.sleep(10)
-            
+            parsed_basic_doc = parser.parse(save_path)
+            node_count = len(parsed_basic_doc.nodes)
+            total_length = sum(len(str(node)) for node in parsed_basic_doc.nodes)
+
             # 生成CSV文件名
             csv_filename = os.path.basename(save_path).replace('.pdf', '.csv')
             csv_path = os.path.join(session_csv_folder, csv_filename)
             
-            # 临时保存CSV文件，内容为2行3列，第一行为文件名，第二行为节点数量和总长度
-            node_count = len(nodes)
-            total_length = sum(len(str(node)) for node in nodes)
+            # 保存CSV文件
             with open(csv_path, mode='w', newline='', encoding='utf-8') as csvfile:
                 csv_writer = csv.writer(csvfile)
                 csv_writer.writerow([os.path.basename(save_path), '', ''])
@@ -143,9 +142,33 @@ def moc_process_files(files, session_csv_folder):
             
             print(f"Processing completed for file: {save_path}")
             print(f"CSV file saved to: {csv_path}")
+
         except Exception as e:
-            print(f"Error processing file {save_path}: {str(e)}")
+            error_msg = f"Error processing file {save_path}: {str(e)}"
+            print(error_msg)
+            error_messages.append(error_msg)
+            # 将错误信息写入文件
+            error_file = os.path.join(session_csv_folder, "errors.log")
+            with open(error_file, 'a') as f:
+                f.write(error_msg + "\n")
     
+    # 如果有错误，返回错误信息
+    if error_messages:
+        return {'status': 'error', 'messages': error_messages}
+    return {'status': 'success'}
+
+@app.route('/api/status/<session_id>', methods=['GET'])
+def get_processing_status(session_id):
+    error_file = os.path.join(UPLOAD_BASE_FOLDER, session_id, 'csv', 'errors.log')
+    if os.path.exists(error_file):
+        with open(error_file, 'r') as f:
+            errors = f.readlines()
+        return jsonify({
+            'status': 'error',
+            'messages': [error.strip() for error in errors]
+        }), 400
+    
+    return jsonify({'status': 'processing'}), 200
 
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5328)

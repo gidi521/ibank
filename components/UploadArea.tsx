@@ -53,8 +53,18 @@ const UploadArea = ({ onUploadSuccess }: { onUploadSuccess?: () => void }) => {
   };
 
   // 新增：计算处理时间的函数
-  const calculateProcessingTime = (totalLength: number) => {
-    return Math.ceil((totalLength / 100000) * 5);
+  const calculateProcessingTime = (fileSize: number) => {
+    const MEGABYTE = 1024 * 1024;
+    const baseSize = 2 * MEGABYTE;
+    const baseTime = 30;
+
+    if (fileSize <= baseSize) {
+      return baseTime;
+    } else {
+      const additionalSize = fileSize - baseSize;
+      const additionalIntervals = Math.ceil(additionalSize / baseSize);
+      return baseTime + (additionalIntervals * baseTime);
+    }
   };
 
   const uploadFiles = async (files: FileList) => {
@@ -89,25 +99,27 @@ const UploadArea = ({ onUploadSuccess }: { onUploadSuccess?: () => void }) => {
       const data = await response.json();
       // 文件返回结构是
       // {
-      //   'message': '文件已接收，正在处理...',
-      //   'results': [{
-      //     'file_name': filename,
-      //     'node_count': node_count,
-      //     'total_length': total_length
-      //   },{
-      //     'file_name': filename,
-      //     'node_count': node_count,
-      //     'total_length': total_length
-      //   }]
-      // }
-      
+      //     'message': '文件已接收，正在处理...',
+      //     'saved_files': [{
+      //        'path': save_path,
+      //        },
+      //      ],
+      //     'not_saved_files': [{
+      //        'file_name': file.filename,
+      //        'error': 'file size exceeds limit'
+      //        },
+      //      ]
+      //  }
+        
       if (response.ok) {
         console.log(data);
+        // 检查是否有错误信息,如果有则显示错误信息,如果返回的文件列表与上传的文件列表不同，则显示错误信息
+
         // 保留已上传文件，添加新文件
         setUploadedFiles(prev => [...prev, ...Array.from(files)]);
         
         // 保留已有文件的处理时间，添加新文件的处理时间
-        const times = data.results.map((result: any) => calculateProcessingTime(result.total_length));
+        const times = Array.from(files).map((file: File) => calculateProcessingTime(file.size));
         setProcessingTimes(prev => [...prev, ...times]);
         
         // 保留已有文件的进度，初始化新文件的进度为0
