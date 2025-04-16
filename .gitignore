@@ -10,6 +10,8 @@ public/upload/
 # testing
 /coverage
 /api/nextjs-flask-openparse-venv
+/nextjs-flask-openparse-venv
+/.idea
 
 # next.js
 /.next/
@@ -42,3 +44,7 @@ next-env.d.ts
 postgres_data/
 .env*.local
 docker-compose.yml
+api/api.log
+api.log
+api/__pycache__/index.cpython-39.pyc
+api/__pycache__/index.cpython-312.pyc

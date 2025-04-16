@@ -6,6 +6,8 @@ import openparse
 from werkzeug.utils import secure_filename
 from openai import OpenAI
 import csv
+import logging
+from datetime import datetime
 
 app = Flask(__name__)
 executor = ThreadPoolExecutor(5)  # 控制并发数
@@ -30,10 +32,19 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+# 在文件顶部添加日志配置
+logging.basicConfig(
+    filename='api.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 @app.route('/api/python', methods=['POST'])
 def upload_file():
     # 检查是否有文件
     if 'files' not in request.files:
+        logger.error('No file part in request')
         return jsonify({'error': 'No file part'}), 400
     
     files = request.files.getlist('files')
@@ -58,9 +69,10 @@ def upload_file():
                 'file_name': file.filename,
                 'error': 'filename is empty'
             })
+            logger.warning(f'Empty filename received')
             continue
         else:
-            print(f"Received file: {file.filename}")
+            logger.info(f"Received file: {file.filename}")
             
         # 检查文件类型
         if not allowed_file(file.filename):
@@ -105,11 +117,11 @@ def upload_file():
             try:
                 f.result()  # 这会抛出任务中的任何异常
             except Exception as e:
-                print(f"Background task failed: {str(e)}")
+                logger.error(f"Background task failed: {str(e)}")
         future.add_done_callback(callback)
-        print("Background processing started successfully")
+        logger.info("Background processing started successfully")
     except Exception as e:
-        print(f"Error starting background processing: {str(e)}")
+        logger.error(f"Error starting background processing: {str(e)}")
         return jsonify({'error': 'Failed to start background processing'}), 500
     
     return jsonify({
@@ -120,32 +132,115 @@ def upload_file():
 
 
 def process_files(files, session_csv_folder):
-    print("Starting background processing...")
+    logger.info("Starting background processing...")
     error_messages = []
     
     for file_info in files:
         save_path = file_info['path']
         try:
+            # 生成CSV文件名
+            csv_filename = os.path.basename(save_path).replace('.pdf', '.csv')
+            csv_path = os.path.join(session_csv_folder, csv_filename)
+
+            # 解析PDF文件
             parsed_basic_doc = parser.parse(save_path)
             node_count = len(parsed_basic_doc.nodes)
             total_length = sum(len(str(node)) for node in parsed_basic_doc.nodes)
 
-            # 生成CSV文件名
-            csv_filename = os.path.basename(save_path).replace('.pdf', '.csv')
-            csv_path = os.path.join(session_csv_folder, csv_filename)
+            # 把每一个node的序号、长度，以及内容，记录到log中
+            # for index, node in enumerate(parsed_basic_doc.nodes, start=1):
+            #     for idx, element in enumerate(node, start=1):
+            #         element_str = str(element)
+            #         element_length = len(element_str)
+            #         if element_length > 50000:
+            #             logger.warning(f"Element Index {idx} in Node {index} has length greater than 50000. Element Content: {element_str}")
+
+                
+            # 新建一个nodes列表，用于存储需要处理的node
+            new_nodes = []
+            total_length_new_nodes = 0
+            for index, node in enumerate(parsed_basic_doc.nodes, start=1):
+                new_elements = []
+                total_length_new_elements = 0
+                for idx, element in enumerate(node, start=1):
+                    element_str = str(element)
+                    element_length = len(element_str)
+                    if element_length < 57344:
+                        new_elements.append(element)
+                        total_length_new_elements += element_length
+                    else:
+                        logger.warning(f"Element Index {idx} in Node {index} has length greater than 50000. Element Content: {element_str}")
+
+                new_nodes.append(new_elements)
+                total_length_new_nodes += total_length_new_elements
+
+            # 检查总长度是否超过50000
+            if total_length_new_nodes < 57344:
+                completion = client.chat.completions.create(
+                    model="deepseek-v3",
+                    messages=[
+                        {'role': 'user', 'content': f'这是一个bankstatement的pdf文件内容的读取结果，请将其主要内容转换为以csv文件的格式，所有数值都不需要分位符。{new_nodes}'}
+                    ]
+                )
+                print("最终答案：")
+                content = completion.choices[0].message.content
+                start_index = content.find('```')
+                if start_index != -1:
+                    start_index += 3
+                    end_index = content.find('```', start_index)
+                    if end_index != -1:
+                        result = content[start_index:end_index].strip()
+                        # 删除第一行的"csv"字样
+                        if result.startswith('csv\n'):
+                            result = result[4:]
+                        
+                        # 打印返回的result
+                        # print(f"Returned result length: {len(result)}")
+                        # print(f"Result preview: {result[:100]}...")  # 打印前100个字符
+                        # print(f"Result preview from bottom: {result[-100:]}...")  # 打印后100个字符
+                        # print("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR")
+                        
+                        print(result) 
+                        # 将result写入CSV文件
+                        try:
+                            # Split the result into lines
+                            lines = result.split('\n')
+                            # Create a CSV reader to parse the lines
+                            csv_reader = csv.reader(lines)
+                            # Write the parsed data to the CSV file
+                            with open(csv_path, mode='w', newline='', encoding='utf-8') as csvfile:
+                                csv_writer = csv.writer(csvfile)
+                                for row in csv_reader:
+                                    csv_writer.writerow(row)
+                            logger.info(f"Successfully wrote result to {csv_path}")
+                        except Exception as e:
+                            error_msg = f"Error writing result to {csv_path}: {str(e)}"
+                            logger.error(error_msg)
+                            # Write the error message to the error file
+                            error_file = os.path.join(session_csv_folder, "errors.log")
+                            with open(error_file, 'a') as f:
+                                f.write(error_msg + "\n")
+                        
+                    else:
+                        print("content:", content)
+                else:
+                    print("not start_index content:", content)
+            else:
+                print("total_length_new_nodes:", total_length_new_nodes)
+            
             
             # 保存CSV文件
-            with open(csv_path, mode='w', newline='', encoding='utf-8') as csvfile:
-                csv_writer = csv.writer(csvfile)
-                csv_writer.writerow([os.path.basename(save_path), '', ''])
-                csv_writer.writerow([node_count, total_length, ''])
+            # with open(csv_path, mode='w', newline='', encoding='utf-8') as csvfile:
+            #     csv_writer = csv.writer(csvfile)
+            #     csv_writer.writerow([os.path.basename(save_path), '', ''])
+            #     csv_writer.writerow([node_count, total_length, ''])
             
-            print(f"Processing completed for file: {save_path}")
-            print(f"CSV file saved to: {csv_path}")
+            # logger.info(f"Background processing completed for file: {save_path}")
+            # logger.info(f"Background processing CSV file saved to: {csv_path}")
 
         except Exception as e:
-            error_msg = f"Error processing file {save_path}: {str(e)}"
-            print(error_msg)
+            error_msg = f"Background error processing file {save_path}: {str(e)}"
+            logger.error(error_msg)
             error_messages.append(error_msg)
             # 将错误信息写入文件
             error_file = os.path.join(session_csv_folder, "errors.log")
