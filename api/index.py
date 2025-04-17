@@ -34,7 +34,7 @@ def allowed_file(filename):
 
 # 在文件顶部添加日志配置
 logging.basicConfig(
-    filename='api.log',
+    filename='api1.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
@@ -96,7 +96,7 @@ def upload_file():
         # 安全保存文件到session_id子目录
         filename = secure_filename(file.filename)
         filename = file.filename
-        print(f"Processing file: {filename}")
+        logger.warning(f"Processing file: {filename}")
         save_path = os.path.join(session_pdf_folder, filename)
         file.save(save_path)
 
@@ -143,11 +143,13 @@ def process_files(files, session_csv_folder):
             csv_path = os.path.join(session_csv_folder, csv_filename)
 
             # 解析PDF文件
+            logger.warning(f"Processing file: {save_path}")
             parsed_basic_doc = parser.parse(save_path)
+            logger.warning(f"parsed_basic_doc: {save_path}")
             node_count = len(parsed_basic_doc.nodes)
             total_length = sum(len(str(node)) for node in parsed_basic_doc.nodes)
 
-            # 把每一个node的序号、长度，以及内容，记录到log中
+            # 把每一个node的序号、长度，以及内容，记录到log中，用于研究node的结构
             # for index, node in enumerate(parsed_basic_doc.nodes, start=1):
             #     for idx, element in enumerate(node, start=1):
             #         element_str = str(element)
@@ -159,30 +161,41 @@ def process_files(files, session_csv_folder):
             # 新建一个nodes列表，用于存储需要处理的node
             new_nodes = []
             total_length_new_nodes = 0
+            logger.warning(f"new_nodes starting: {save_path}")
             for index, node in enumerate(parsed_basic_doc.nodes, start=1):
                 new_elements = []
                 total_length_new_elements = 0
                 for idx, element in enumerate(node, start=1):
                     element_str = str(element)
                     element_length = len(element_str)
-                    if element_length < 57344:
+                    if element_str.startswith("('text'"):
                         new_elements.append(element)
                         total_length_new_elements += element_length
+                        logger.warning(f"Element Index {idx} in Node {index} is saved. Element Content Head: {element_str[:100]}")
+                        logger.warning(f"Element Index {idx} in Node {index} is saved. Element Content Tail: {element_str[:100]}")
+                    
+                    if element_length < 57344:
+                        # new_elements.append(element)
+                        # total_length_new_elements += element_length
+                        logger.warning(f"Element Index {idx} in Node {index} has length less than 50000. Element Content Head: {element_str[:100]}")
+                        logger.warning(f"Element Index {idx} in Node {index} has length less than 50000. Element Content Tail: {element_str[-100:]}")
                     else:
-                        logger.warning(f"Element Index {idx} in Node {index} has length greater than 50000. Element Content: {element_str}")
+                        logger.warning(f"Element Index {idx} in Node {index} has length greater than 50000. Element Content Head: {element_str[:1000]}")
+                        logger.warning(f"Element Index {idx} in Node {index} has length greater than 50000. Element Content Tail: {element_str[-1000:]}")
 
                 new_nodes.append(new_elements)
                 total_length_new_nodes += total_length_new_elements
-
+            logger.warning(f"new_nodes done: {save_path}")
             # 检查总长度是否超过50000
             if total_length_new_nodes < 57344:
+                logger.warning("sending to AI:")
                 completion = client.chat.completions.create(
                     model="deepseek-v3",
                     messages=[
-                        {'role': 'user', 'content': f'这是一个bankstatement的pdf文件内容的读取结果，请将其主要内容转换为以csv文件的格式，所有数值都不需要分位符。{new_nodes}'}
+                        {'role': 'user', 'content': f'这是一个bankstatement的pdf文件内容的读取结果，请将其内容转换为以csv文件的格式，所有数值都不需要分位符。{new_nodes}'}
                     ]
                 )
-                print("最终答案：")
+                logger.warning("最终答案：")
                 content = completion.choices[0].message.content
                 start_index = content.find('```')
                 if start_index != -1:
@@ -194,14 +207,9 @@ def process_files(files, session_csv_folder):
                         if result.startswith('csv\n'):
                             result = result[4:]
                         
-                        # 打印返回的result
-                        # print(f"Returned result length: {len(result)}")
-                        # print(f"Result preview: {result[:100]}...")  # 打印前100个字符
-                        # print(f"Result preview from bottom: {result[-100:]}...")  # 打印后100个字符
-                        # print("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR")
-                        
-                        print(result) 
+                        logger.warning(f"result without ```: \n{result}")
                         # 将result写入CSV文件
+                        logger.warning("writing to csv:")
                         try:
                             # Split the result into lines
                             lines = result.split('\n')
@@ -216,36 +224,27 @@ def process_files(files, session_csv_folder):
                         except Exception as e:
                             error_msg = f"Error writing result to {csv_path}: {str(e)}"
                             logger.error(error_msg)
-                            # Write the error message to the error file
-                            error_file = os.path.join(session_csv_folder, "errors.log")
-                            with open(error_file, 'a') as f:
-                                f.write(error_msg + "\n")
-                        
+                            # # Write the error message to the error file
+                            # error_file = os.path.join(session_csv_folder, "errors.log")
+                            # with open(error_file, 'a') as f:
+                            #     f.write(error_msg + "\n")
                     else:
-                        print("content:", content)
+                        logger.warning("There is no second ``` in content:", content)
                 else:
-                    print("not start_index content:", content)
+                    logger.warning("There is nt ``` in content:", content)
             else:
-                print("total_length_new_nodes:", total_length_new_nodes)
-            
-            
-            # 保存CSV文件
-            # with open(csv_path, mode='w', newline='', encoding='utf-8') as csvfile:
-            #     csv_writer = csv.writer(csvfile)
-            #     csv_writer.writerow([os.path.basename(save_path), '', ''])
-            #     csv_writer.writerow([node_count, total_length, ''])
-            
-            # logger.info(f"Background processing completed for file: {save_path}")
-            # logger.info(f"Background processing CSV file saved to: {csv_path}")
+                logger.warning("total_length_new_nodes greater than 57344:", total_length_new_nodes)
+                error_msg = f"Background error processing file {save_path}: file too long"
+                error_messages.append(error_msg)
 
         except Exception as e:
             error_msg = f"Background error processing file {save_path}: {str(e)}"
             logger.error(error_msg)
             error_messages.append(error_msg)
             # 将错误信息写入文件
-            error_file = os.path.join(session_csv_folder, "errors.log")
-            with open(error_file, 'a') as f:
-                f.write(error_msg + "\n")
+            # error_file = os.path.join(session_csv_folder, "errors.log")
+            # with open(error_file, 'a') as f:
+            #     f.write(error_msg + "\n")
     
     # 如果有错误，返回错误信息
     if error_messages:
