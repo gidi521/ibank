@@ -146,13 +146,12 @@ export default function HomePage() {
     for (let i = 0; i < files.length; i++) {
       formData.append("files", files[i]);
     }
-
+  
     // 获取sessionId
     const sessionId = sessionStorage.getItem('sessionId');
-
-
+  
     try {
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/api/python', {
         method: 'POST',
         body: formData,
         headers: {
@@ -162,8 +161,18 @@ export default function HomePage() {
       const data = await response.json();
       if (response.ok) {
         console.log("文件上传成功");
-        // 跳转到converter页面
-        router.push('/converter');
+        // 准备上传文件信息
+        const uploadedFilesInfo = Array.from(files).map(file => ({
+          name: file.name,
+          size: file.size
+        }));
+        // Generate a URL with query parameters
+        const queryString = new URLSearchParams({
+          uploadedFilesInfo: JSON.stringify(uploadedFilesInfo)
+        }).toString();
+        const url = `/converter?${queryString}`;
+        // 跳转到converter页面并携带参数
+        router.push(url);
       } else {
         console.error(data.error);
       }

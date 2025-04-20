@@ -6,7 +6,12 @@ import {
 } from "lucide-react";
 import { FileText } from "lucide-react";
 
-const UploadArea = ({ onUploadSuccess }: { onUploadSuccess?: () => void }) => {
+interface UploadAreaProps {
+  onUploadSuccess?: () => void;
+  initialFiles?: { name: string; size: number }[];
+}
+
+const UploadArea = ({ onUploadSuccess, initialFiles = [] }: UploadAreaProps) => {
   const dropRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
@@ -189,6 +194,104 @@ const UploadArea = ({ onUploadSuccess }: { onUploadSuccess?: () => void }) => {
       console.error('文件上传失败:', error);
     }
   };
+
+  useEffect(() => {
+    if (initialFiles.length > 0) {
+      const checkAndInitializeFiles = async () => {
+        const sessionId = sessionStorage.getItem('sessionId');
+        if (!sessionId) return;
+
+        try {
+          const response = await fetch(`/api/files?sessionId=${sessionId}`);
+          const data = await response.json();
+          
+          // 过滤掉已有同名CSV文件的文件
+          const filesToProcess = initialFiles.filter(file => 
+            !data.files.some((f: any) => 
+              f.name === file.name.replace('.pdf', '.csv')
+            )
+          );
+  
+          if (filesToProcess.length === 0) return;
+
+       // 将过滤后的文件转换为File对象
+        const files = filesToProcess.map(file => {
+          const customFile = new File([], file.name, {
+            lastModified: Date.now(),
+            type: 'application/pdf'
+          });
+          Object.defineProperty(customFile, 'size', {
+            value: file.size,
+            writable: false
+          });
+          return customFile;
+        });
+      
+      setUploadedFiles(files);
+      
+      // 计算处理时间
+      const times = files.map(file => calculateProcessingTime(file.size));
+      setProcessingTimes(times);
+      
+      // 初始化进度
+      setProgress(new Array(times.length).fill(0));
+      
+      // 启动进度条
+      times.forEach((time, index) => {
+        const interval = 1000;
+        const steps = time;
+        let currentStep = 0;
+        let isPaused = false;
+        
+        const timer = setInterval(async () => {
+          if (!isPaused && currentStep < steps - 2) {
+            currentStep++;
+            setProgress(prev => {
+              const newProgress = [...prev];
+              newProgress[index] = (currentStep / steps) * 100;
+              return newProgress;
+            });
+          } else if (!isPaused) {
+            isPaused = true;
+            
+            const checkFileInterval = setInterval(async () => {
+              try {
+                const sessionId = sessionStorage.getItem('sessionId');
+                const response = await fetch(`/api/files?sessionId=${sessionId}`);
+                const data = await response.json();
+                
+                const csvExists = data.files.some((file: any) => 
+                  file.name === files[index].name.replace('.pdf', '.csv')
+                );
+                
+                if (csvExists) {
+                  setProgress(prev => {
+                    const newProgress = [...prev];
+                    newProgress[index] = 100;
+                    return newProgress;
+                  });
+                  clearInterval(checkFileInterval);
+                  clearInterval(timer);
+                  
+                  if (onUploadSuccess) {
+                    onUploadSuccess();
+                  }
+                }
+              } catch (error) {
+                console.error('Error checking file:', error);
+              }
+            }, 2000);
+          }
+        }, interval);
+      });
+    } catch (error) {
+      console.error('Error checking files:', error);
+    }
+  };
+
+  checkAndInitializeFiles();
+    }
+  }, [initialFiles, onUploadSuccess]);
   
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
