@@ -8,6 +8,7 @@ from openai import OpenAI
 import csv
 import logging
 from datetime import datetime
+import openpyxl
 
 app = Flask(__name__)
 executor = ThreadPoolExecutor(5)  # 控制并发数
@@ -221,6 +222,23 @@ def process_files(files, session_csv_folder):
                                 for row in csv_reader:
                                     csv_writer.writerow(row)
                             logger.info(f"Successfully wrote result to {csv_path}")
+
+                            # Create a new Excel workbook and select the active sheet
+                            wb = openpyxl.Workbook()
+                            ws = wb.active
+
+                            # Reset the CSV reader
+                            csv_reader = csv.reader(result.split('\n'))
+
+                            # Write data from CSV reader to Excel sheet
+                            for row in csv_reader:
+                                ws.append(row)
+
+                            # Save the Excel file
+                            excel_path = os.path.splitext(csv_path)[0] + '.xlsx'
+                            wb.save(excel_path)
+                            logger.info(f"Successfully wrote result to {excel_path}")
+                            
                         except Exception as e:
                             error_msg = f"Error writing result to {csv_path}: {str(e)}"
                             logger.error(error_msg)
