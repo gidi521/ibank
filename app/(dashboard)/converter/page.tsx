@@ -1,11 +1,20 @@
-"use client";
-
+'use client';
+import { Suspense } from 'react';
 import { useState, useEffect } from 'react';
 import UploadArea from '@/components/UploadArea';
 import ConversionLibrary from '@/components/ConversionLibrary';
 import { useSearchParams } from 'next/navigation';
 
 export default function ConverterPage() {
+  return (
+    <Suspense fallback={<div>加载中...</div>}>
+      <MainContent />
+    </Suspense>
+  );
+}
+
+function MainContent() {
+  // 将原有组件逻辑移动到这里
   const [refreshKey, setRefreshKey] = useState(0);
   const searchParams = useSearchParams();
   const [initialFiles, setInitialFiles] = useState<{ name: string; size: number }[]>([]);
