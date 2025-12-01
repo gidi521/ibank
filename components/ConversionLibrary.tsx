@@ -95,7 +95,7 @@ const ConversionLibrary = ({ refreshKey }: ConversionLibraryProps) => {
                         download
                         className="text-blue-500 hover:text-blue-700"
                       >
-                        Download CSV
+                        Download
                       </a>
                     </td>
                   </tr>

@@ -34,27 +34,33 @@ export default function HomePage() {
   const banks = [
     {
       name: "BNP Paribas",
-      logo: "https://bankstatementwizard.com/_next/static/media/bnp_paribas.4f3fb75c.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/bnp_paribas.4f3fb75c.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/1c5c86c9-0b33-4bff-955b-05ee2ae4d640/logo.png",
     },
     {
       name: "Bank of America",
-      logo: "https://bankstatementwizard.com/_next/static/media/bank_of_america.b00ec101.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/bank_of_america.b00ec101.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/843f99c3-68eb-42b0-834c-cfb6d70fca9c/logo.png",
     },
     {
       name: "Barclays",
-      logo: "https://bankstatementwizard.com/_next/static/media/barclays.98b989f2.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/barclays.98b989f2.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/136da4d2-66f6-48ab-87c2-94002fb29070/logo.png",
     },
     {
       name: "Citibank",
-      logo: "https://bankstatementwizard.com/_next/static/media/citibank.c6845233.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/citibank.c6845233.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/762d2cfd-0658-4663-a968-847a736d0792/logo.png",
     },
     {
       name: "HSBC",
-      logo: "https://bankstatementwizard.com/_next/static/media/hsbc.98c37690.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/hsbc.98c37690.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/9cee3a1c-7e73-4fde-9db4-7782226c86e6/logo.png",
     },
     {
       name: "UniCredit",
-      logo: "https://bankstatementwizard.com/_next/static/media/unicredit.e3feb2c5.svg",
+      // logo: "https://bankstatementwizard.com/_next/static/media/unicredit.e3feb2c5.svg",
+      logo: "https://storage.googleapis.com/bankstatementwizard_web_assets/banks/7b48769e-c211-4c67-9a31-3613889b9ca2/logo.png",
     },
   ];
 
@@ -146,13 +152,12 @@ export default function HomePage() {
     for (let i = 0; i < files.length; i++) {
       formData.append("files", files[i]);
     }
-
+  
     // 获取sessionId
     const sessionId = sessionStorage.getItem('sessionId');
-
-
+  
     try {
-      const response = await fetch('/api/upload', {
+      const response = await fetch('/api/python', {
         method: 'POST',
         body: formData,
         headers: {
@@ -162,8 +167,18 @@ export default function HomePage() {
       const data = await response.json();
       if (response.ok) {
         console.log("文件上传成功");
-        // 跳转到converter页面
-        router.push('/converter');
+        // 准备上传文件信息
+        const uploadedFilesInfo = Array.from(files).map(file => ({
+          name: file.name,
+          size: file.size
+        }));
+        // Generate a URL with query parameters
+        const queryString = new URLSearchParams({
+          uploadedFilesInfo: JSON.stringify(uploadedFilesInfo)
+        }).toString();
+        const url = `/converter?${queryString}`;
+        // 跳转到converter页面并携带参数
+        router.push(url);
       } else {
         console.error(data.error);
       }
@@ -279,12 +294,15 @@ export default function HomePage() {
             <div className="mx-auto grid gap-8 max-w-screen-xl">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 md:gap-18">
                 {banks.map((bank, index) => (
-                  <div key={index} className="flex items-center justify-center">
+                  <div key={index} className="flex items-center justify-center space-x-4">
                     <img
                       src={bank.logo}
                       alt={`${bank.name} logo`}
-                      className="h-15 object-contain"
+                      className="w-36 h-18.75 object-contain"
                     />
+                    <span className="text-gray-700 font-bold text-xl">
+                      {bank.name}
+                    </span>
                   </div>
                 ))}
               </div>
